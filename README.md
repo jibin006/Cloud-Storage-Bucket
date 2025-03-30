@@ -98,31 +98,8 @@ The S3 encryption was failing due to missing KMS key reference.
    terraform apply
    ```
 
+## Resource
+   https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#acl-1
+
 ## Conclusion
 This challenge demonstrated the importance of **Terraform dependency management**, **IAM policy structuring**, and **proper encryption configurations**. By adding explicit dependencies and fixing syntax errors, the deployment was successfully completed. 🚀
-
-
-
-
-
-
-Fix: Remove Large Files from Git History & Push Again
-Your push is still failing because the 614MB .exe file is already committed in your Git history. Just ignoring it now won't work—you need to remove it from Git's history.
-
-Step 1: Remove the Large File from Git History
-Run this command in PowerShell:
-
-powershell
-Copy
-Edit
-git filter-branch --force --index-filter "git rm --cached --ignore-unmatch .terraform/providers/registry.terraform.io/hashicorp/aws/5.93.0/windows_386/terraform-provider-aws_v5.93.0_x5.exe" --prune-empty --tag-name-filter cat -- --all
-💡 This removes the file from all commits.
-
-Step 2: Force Push the Cleaned Repo
-Since you've rewritten Git history, you need to force push:
-
-powershell
-Copy
-Edit
-git push origin main --force
-⚠️ This will overwrite history on GitHub! Ensure no other team members are working on this branch.
