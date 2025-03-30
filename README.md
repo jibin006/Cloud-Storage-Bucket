@@ -98,6 +98,9 @@ The S3 encryption was failing due to missing KMS key reference.
    terraform apply
    ```
 
+<img width="710" alt="image" src="https://github.com/user-attachments/assets/ae76dabf-e10d-4073-a06a-b2bff83986cf" />
+
+
 ## Resource
    https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#acl-1
 
