@@ -1,108 +1,194 @@
 # Challenge 1: Secure a Cloud Storage Bucket
 
-## Overview
-This challenge involved creating and configuring an AWS S3 bucket using Terraform. The goal was to apply best practices such as access control, encryption, logging, and bucket policies. I used Terraform for the completion of this challenge.
+## Objective
+The goal of this challenge was to create a secure AWS S3 bucket using Terraform, ensuring that:
+- The bucket is private and not publicly accessible.
+- Only a specific user (`jib_iam`) has access, while another user (`jib02`) is denied.
+- Encryption is enabled using server-side encryption with AWS KMS.
+- Unauthorized access attempts are logged and can be verified.
 
-🛠 Task:
+## Success Criteria
+- Unauthorized users (e.g., `jib02`) cannot access the bucket.
+- Logs show failed access attempts.
+- Encryption is enabled, and data is secure.
 
-Create an S3 bucket (AWS), Cloud Storage bucket (GCP), or Blob Storage (Azure).
+## Approach
+I used Terraform to automate the creation and configuration of the S3 bucket. My script included:
+1. **S3 Bucket Creation**: Defined a private S3 bucket with a unique name.
+2. **Public Access Block**: Blocked all public access to the bucket.
+3. **IAM Policy**: Allowed access only to the `jib_iam` user and denied `jib02`.
+4. **KMS Encryption**: Enabled server-side encryption with a custom KMS key.
+5. **Logging**: Configured a separate S3 bucket to log access attempts.
 
-Disable public access and ensure it's private.
+Here’s the final Terraform script that met all requirements:
 
-Set up IAM roles to allow access only to specific users/services.
+```hcl
+resource "aws_s3_bucket" "example" {
+  bucket = "my-tf-example-bucketjib"
+}
 
-Enable encryption (SSE-KMS in AWS, CMEK in GCP, Azure SSE).
+resource "aws_s3_bucket_ownership_controls" "example" {
+  bucket = aws_s3_bucket.example.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
 
-Test unauthorized access using another account and check logs.
+resource "aws_s3_bucket_acl" "example" {
+  depends_on = [aws_s3_bucket_ownership_controls.example]
+  bucket = aws_s3_bucket.example.id
+  acl    = "private"
+}
 
-✅ Success Criteria:
+resource "aws_s3_bucket_public_access_block" "example" {
+  bucket                  = aws_s3_bucket.example.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
 
-Unauthorized users cannot access the bucket.
+data "aws_iam_policy_document" "combined_bucket_policy" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::816069160759:user/jib_iam"]
+    }
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [aws_s3_bucket.example.arn, "${aws_s3_bucket.example.arn}/*"]
+  }
+  statement {
+    effect = "Deny"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::816069160759:user/jib02"]
+    }
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [aws_s3_bucket.example.arn, "${aws_s3_bucket.example.arn}/*"]
+  }
+}
 
-Logs show failed access attempts.
+resource "aws_s3_bucket_policy" "bucket_policy" {
+  bucket = aws_s3_bucket.example.id
+  policy = data.aws_iam_policy_document.combined_bucket_policy.json
+  depends_on = [aws_s3_bucket.example]
+}
 
-Encryption is enabled, and data is secure.
+resource "aws_kms_key" "mykey" {
+  description             = "This key is used to encrypt bucket objects"
+  deletion_window_in_days = 10
+}
 
-## Resources Created
-- **S3 Bucket** (`aws_s3_bucket.example`)
-- **Bucket Ownership Controls** (`aws_s3_bucket_ownership_controls.example`)
-- **Bucket ACL** (`aws_s3_bucket_acl.example`)
-- **Public Access Block** (`aws_s3_bucket_public_access_block.example`)
-- **Bucket Policy** (`aws_s3_bucket_policy.bucket_policy`)
-- **IAM Policy Documents** to manage access restrictions
-- **KMS Key** for server-side encryption (`aws_kms_key.mykey`)
-- **Bucket Encryption Configuration** (`aws_s3_bucket_server_side_encryption_configuration.example`)
-- **S3 Logging Configuration** (`aws_s3_bucket_logging.example`)
+resource "aws_s3_bucket_server_side_encryption_configuration" "example" {
+  bucket = aws_s3_bucket.example.id
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.mykey.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
 
-## Issues Faced & Solutions
+resource "aws_s3_bucket" "log_bucket" {
+  bucket = "my-tf-logs-bucketjib06"
+}
 
-### ❌ Issue 1: "Couldn't find resource" error while applying S3 bucket policy
-#### **Error Message:**
-```sh
-│ Error: waiting for S3 Bucket Policy (my-tf-example-bucketjib) create: couldn't find resource
+resource "aws_s3_bucket_logging" "example" {
+  bucket        = aws_s3_bucket.example.id
+  target_bucket = aws_s3_bucket.log_bucket.id
+  target_prefix = "logs/"
+}
 ```
-#### **Cause:**
-Terraform was attempting to apply the bucket policy before the S3 bucket was fully created, causing a race condition.
 
-#### **Solution:**
-Added an explicit dependency on the S3 bucket in the bucket policy resource:
+## Issues Faced and Resolutions
+
+### Issue 1: Bucket Name Conflicts
+**Problem**: When I tried to create the S3 buckets (`my-tf-example-bucket` and `my-tf-logs-bucket`), I got a `BucketAlreadyExists` error because the names were already taken by another AWS account.
+
+**Resolution**: Since S3 bucket names must be globally unique, I added a unique suffix to the bucket names (e.g., `my-tf-example-bucketjib` and `my-tf-logs-bucketjib06`). This ensured the names were unique and avoided conflicts.
+
+**How I Fixed It**: Manually modified the `bucket` attribute in the `aws_s3_bucket` resources:
+```hcl
+bucket = "my-tf-example-bucketjib"
+bucket = "my-tf-logs-bucketjib06"
+```
+
+### Issue 2: Invalid Principal in Bucket Policy
+**Problem**: I got a `MalformedPolicy: Invalid principal in policy` error when applying the bucket policy. I initially used the AWS account ID (`816069160759`) instead of a proper ARN.
+
+**Resolution**: I updated the policy to use the full ARN of the specific user (`arn:aws:iam::816069160759:user/jib_iam`) instead of just the account ID.
+
+**How I Fixed It**: Corrected the `identifiers` in the policy:
+```hcl
+identifiers = ["arn:aws:iam::816069160759:user/jib_iam"]
+```
+
+### Issue 3: Both Users Could Access the Bucket
+**Problem**: Even after specifying `jib_iam` in the bucket policy, the other user (`jib02`) could still access the bucket. This was because the policy only allowed `jib_iam` but didn’t explicitly deny `jib02`, and `jib02` might have had access via other permissions.
+
+**Resolution**: I added an explicit `Deny` statement for `jib02` in the bucket policy to ensure only `jib_iam` had access.
+
+**How I Fixed It**: Combined both `Allow` and `Deny` statements into one policy document:
+```hcl
+data "aws_iam_policy_document" "combined_bucket_policy" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::816069160759:user/jib_iam"]
+    }
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [aws_s3_bucket.example.arn, "${aws_s3_bucket.example.arn}/*"]
+  }
+  statement {
+    effect = "Deny"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::816069160759:user/jib02"]
+    }
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [aws_s3_bucket.example.arn, "${aws_s3_bucket.example.arn}/*"]
+  }
+}
+```
+
+### Issue 4: Bucket Policy Timing Issue
+**Problem**: I encountered an error: `couldn't find resource` when applying the bucket policy, likely because Terraform tried to apply the policy before the bucket was fully created.
+
+**Resolution**: I added a `depends_on` attribute to the `aws_s3_bucket_policy` resource to ensure the bucket was created first.
+
+**How I Fixed It**: Added the dependency:
 ```hcl
 resource "aws_s3_bucket_policy" "bucket_policy" {
   bucket = aws_s3_bucket.example.id
   policy = data.aws_iam_policy_document.combined_bucket_policy.json
-
   depends_on = [aws_s3_bucket.example]
 }
 ```
 
-### ❌ Issue 2: Incorrect IAM Policy Document Formatting
-#### **Cause:**
-The IAM policy document was incorrectly structured, leading to syntax issues.
+## Final Outcome
+After resolving these issues, the Terraform script successfully:
+- Created a private S3 bucket (`my-tf-example-bucketjib`) with a unique name.
+- Blocked all public access.
+- Allowed only `jib_iam` to access the bucket while denying `jib02`.
+- Enabled server-side encryption with AWS KMS.
+- Configured logging to a separate bucket (`my-tf-logs-bucketjib06`).
 
-#### **Solution:**
-- Ensured the policy had proper JSON syntax.
-- Corrected the **Deny** and **Allow** statements within `data "aws_iam_policy_document"`.
+**Testing Results**:
+- `jib_iam` could access the bucket (success).
+- `jib02` was denied access (success).
+- Logs in the separate bucket showed failed access attempts by `jib02`.
+- Encryption was verified via the AWS Console.
+  <img width="710" alt="428391528-ae76dabf-e10d-4073-a06a-b2bff83986cf" src="https://github.com/user-attachments/assets/65f5dcb9-3265-43e1-b916-d1cd8e5caa3f" />
 
-### ❌ Issue 3: Misconfigured Encryption
-#### **Cause:**
-The S3 encryption was failing due to missing KMS key reference.
 
-#### **Solution:**
-- Created an AWS KMS key (`aws_kms_key.mykey`).
-- Linked it properly in the S3 encryption configuration:
-  ```hcl
-  resource "aws_s3_bucket_server_side_encryption_configuration" "example" {
-    bucket = aws_s3_bucket.example.id
-
-    rule {
-      apply_server_side_encryption_by_default {
-        kms_master_key_id = aws_kms_key.mykey.arn
-        sse_algorithm     = "aws:kms"
-      }
-    }
-  }
-  ```
-
-## Steps to Apply Fixes
-1. **Ensure Terraform configuration is correct:**
-   ```sh
-   terraform fmt
-   terraform validate
-   ```
-2. **Refresh the state:**
-   ```sh
-   terraform apply -refresh=true
-   ```
-3. **Apply the updated configuration:**
-   ```sh
-   terraform apply
-   ```
-
-<img width="710" alt="image" src="https://github.com/user-attachments/assets/ae76dabf-e10d-4073-a06a-b2bff83986cf" />
-
+## Lessons Learned
+- **Bucket Naming**: S3 bucket names need to be globally unique, so adding a suffix is a simple fix.
+- **IAM Policies**: Be precise with ARNs and use explicit `Deny` rules to restrict unwanted access.
+- **Dependencies**: Use `depends_on` in Terraform to avoid timing issues with resource creation.
 
 ## Resource
-   https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#acl-1
+https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#acl-1
 
-## Conclusion
-This challenge demonstrated the importance of **Terraform dependency management**, **IAM policy structuring**, and **proper encryption configurations**. By adding explicit dependencies and fixing syntax errors, the deployment was successfully completed. 🚀
+This challenge taught me how to secure cloud storage effectively and troubleshoot common configuration errors in Terraform and AWS.
